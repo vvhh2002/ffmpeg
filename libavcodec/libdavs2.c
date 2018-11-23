@@ -40,12 +40,13 @@ typedef struct DAVS2Context {
 static av_cold int davs2_init(AVCodecContext *avctx)
 {
     DAVS2Context *cad = avctx->priv_data;
-
+    int cpu_flags = av_get_cpu_flags();
     /* init the decoder */
     cad->param.threads      = avctx->thread_count;
     cad->param.info_level   = 0;
     cad->decoder            = davs2_decoder_open(&cad->param);
-
+    cad->param.disable_avx  = !(cpu_flags & AV_CPU_FLAG_AVX &&
+                               cpu_flags & AV_CPU_FLAG_AVX2);
     if (!cad->decoder) {
         av_log(avctx, AV_LOG_ERROR, "decoder created error.");
         return AVERROR_EXTERNAL;
@@ -73,6 +74,7 @@ static int davs2_dump_frames(AVCodecContext *avctx, davs2_picture_t *pic,
                            AV_PIX_FMT_YUV420P10 : AV_PIX_FMT_YUV420P;
 
         avctx->framerate = av_d2q(headerset->frame_rate,4096);
+        *got_frame = 0;
         return 0;
     }
 
@@ -115,7 +117,25 @@ static int davs2_dump_frames(AVCodecContext *avctx, davs2_picture_t *pic,
     frame->format    = avctx->pix_fmt;
     frame->key_frame = pic->type == DAVS2_PIC_I ? 1 : 0;
 
-    return 1;
+   *got_frame = 1;
+    return 0;
+}
+
+static int send_delayed_frame(AVCodecContext *avctx, AVFrame *frame, int *got_frame)
+{
+    DAVS2Context *cad      = avctx->priv_data;
+    int           ret      = DAVS2_DEFAULT;
+
+    ret = davs2_decoder_flush(cad->decoder, &cad->headerset, &cad->out_frame);
+    if (ret == DAVS2_ERROR) {
+        av_log(avctx, AV_LOG_ERROR, "Decoder error: can't flush delayed frame\n");
+        return AVERROR_EXTERNAL;
+    }
+    if (ret == DAVS2_GOT_FRAME) {
+        ret = davs2_dump_frames(avctx, &cad->out_frame, got_frame, &cad->headerset, ret, frame);
+        davs2_decoder_frame_unref(cad->decoder, &cad->out_frame);
+    }
+    return ret;
 }
 
 static av_cold int davs2_end(AVCodecContext *avctx)
@@ -141,16 +161,7 @@ static int davs2_decode_frame(AVCodecContext *avctx, void *data,
     int           ret      = DAVS2_DEFAULT;
 
     if (!buf_size) {
-        ret = davs2_decoder_flush(cad->decoder, &cad->headerset, &cad->out_frame);
-        if (ret == DAVS2_END) {
-            return 0;
-        } else if (ret == DAVS2_GOT_FRAME) {
-            *got_frame = davs2_dump_frames(avctx, &cad->out_frame, &cad->headerset, ret, frame);
-            davs2_decoder_frame_unref(cad->decoder, &cad->out_frame);
-            return ret;
-        } else {
-            return AVERROR_EXTERNAL;
-        }
+       return send_delayed_frame(avctx, frame, got_frame);
     }
 
     cad->packet.data = buf_ptr;
@@ -169,11 +180,17 @@ static int davs2_decode_frame(AVCodecContext *avctx, void *data,
     ret = davs2_decoder_recv_frame(cad->decoder, &cad->headerset, &cad->out_frame);
 
     if (ret != DAVS2_DEFAULT) {
-        *got_frame = davs2_dump_frames(avctx, &cad->out_frame, &cad->headerset, ret, frame);
+        ret = davs2_dump_frames(avctx, &cad->out_frame, &cad->headerset, ret, frame);
         davs2_decoder_frame_unref(cad->decoder, &cad->out_frame);
+        if (ret == 0 || ret == 1) {
+            *got_frame = ret;
+        } else {
+            av_log(avctx, AV_LOG_ERROR, "Decoder error: dump frames failed\n");
+            return ret;
+        }
     }
 
-    return buf_size;
+    return ret == 0 ? buf_size : ret;
 }
 
 AVCodec ff_libdavs2_decoder = {
