@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-CFLAGS=-I/Users/Victor/Documents/CLionProjects/ffmpeg-dev/dev/openmax ./configure --disable-filters --disable-muxers --disable-demuxers --disable-decoders  --disable-protocols --disable-bsfs  --disable-indevs --disable-parsers  --enable-nvomx --enable-omx --disable-doc

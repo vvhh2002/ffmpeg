@@ -331,7 +331,6 @@ External library support:
   --disable-nvdec          disable Nvidia video decoding acceleration (via hwaccel) [autodetect]
   --disable-nvenc          disable Nvidia video encoding code [autodetect]
   --enable-omx             enable OpenMAX IL code [no]
-  --enable-nvomx           enable nvida OpenMAX IL code [no]
   --enable-omx-rpi         enable OpenMAX IL code for Raspberry Pi [no]
   --enable-rkmpp           enable Rockchip Media Process Platform code [no]
   --disable-v4l2-m2m       disable V4L2 mem2mem code [autodetect]
@@ -1798,7 +1797,6 @@ HWACCEL_LIBRARY_LIST="
     libmfx
     mmal
     omx
-    nvomx
     opencl
 "
 
@@ -2923,7 +2921,6 @@ wmv3_vdpau_hwaccel_select="vc1_vdpau_hwaccel"
 
 # hardware-accelerated codecs
 omx_deps="libdl pthreads"
-nvomx_deps="libdl pthreads"
 omx_rpi_select="omx"
 qsv_deps="libmfx"
 qsvdec_select="qsv"
@@ -2954,7 +2951,6 @@ h264_mediacodec_decoder_select="h264_mp4toannexb_bsf h264_parser"
 h264_mmal_decoder_deps="mmal"
 h264_nvenc_encoder_deps="nvenc"
 h264_omx_encoder_deps="omx"
-h264_nv_omx_encoder_deps="nvomx"
 h264_qsv_decoder_select="h264_mp4toannexb_bsf h264_parser qsvdec"
 h264_qsv_encoder_select="qsvenc"
 h264_rkmpp_decoder_deps="rkmpp"
@@ -2998,7 +2994,6 @@ mpeg4_cuvid_decoder_deps="cuvid"
 mpeg4_mediacodec_decoder_deps="mediacodec"
 mpeg4_mmal_decoder_deps="mmal"
 mpeg4_omx_encoder_deps="omx"
-mpeg4_nv_omx_encoder_deps="nvomx"
 mpeg4_v4l2m2m_decoder_deps="v4l2_m2m mpeg4_v4l2_m2m"
 mpeg4_v4l2m2m_encoder_deps="v4l2_m2m mpeg4_v4l2_m2m"
 msmpeg4_crystalhd_decoder_select="crystalhd"
@@ -6228,7 +6223,6 @@ enabled opengl            && { check_lib opengl GL/glx.h glXGetProcAddress "-lGL
                                die "ERROR: opengl not found."
                              }
 enabled omx               && require_headers OMX_Core.h
-enabled nvomx             && require_headers NVOMX_IndexExtensions.h
 enabled omx_rpi           && { check_headers OMX_Core.h ||
                                { ! enabled cross_compile && add_cflags -isystem/opt/vc/include/IL && check_headers OMX_Core.h ; } ||
                                die "ERROR: OpenMAX IL headers not found"; } && enable omx

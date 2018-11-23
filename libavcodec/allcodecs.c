@@ -733,7 +733,6 @@ extern AVCodec ff_h264_amf_encoder;
 extern AVCodec ff_h264_cuvid_decoder;
 extern AVCodec ff_h264_nvenc_encoder;
 extern AVCodec ff_h264_omx_encoder;
-extern AVCodec ff_h264_nv_omx_encoder;
 extern AVCodec ff_h264_qsv_encoder;
 extern AVCodec ff_h264_v4l2m2m_encoder;
 extern AVCodec ff_h264_vaapi_encoder;
