@@ -59,6 +59,8 @@ static int rtp_mpegts_write_header(AVFormatContext *s)
     if (!mpegts_ctx)
         return AVERROR(ENOMEM);
     mpegts_ctx->oformat   = mpegts_format;
+    //copy meta
+    av_dict_copy(&mpegts_ctx->metadata,s->metadata,0);
     mpegts_ctx->max_delay = s->max_delay;
     for (i = 0; i < s->nb_streams; i++) {
         AVStream* st = avformat_new_stream(mpegts_ctx, NULL);
@@ -70,8 +72,22 @@ static int rtp_mpegts_write_header(AVFormatContext *s)
     }
     if ((ret = avio_open_dyn_buf(&mpegts_ctx->pb)) < 0)
         goto fail;
-    if ((ret = avformat_write_header(mpegts_ctx, NULL)) < 0)
-        goto fail;
+
+    //use context opaque as mpegts options
+    AVDictionary * tmp_opts=NULL;
+    if(s->opaque)
+    {
+        tmp_opts=(AVDictionary *)s->opaque;
+
+        if ((ret = avformat_write_header(mpegts_ctx, &tmp_opts)) < 0)
+            goto fail;
+        s->opaque=(void *)tmp_opts;
+    }
+    else
+    {
+        if ((ret = avformat_write_header(mpegts_ctx, NULL)) < 0)
+            goto fail;
+    }
     for (i = 0; i < s->nb_streams; i++)
         s->streams[i]->time_base = mpegts_ctx->streams[i]->time_base;
 
