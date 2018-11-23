@@ -56,7 +56,7 @@ static av_cold int davs2_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int davs2_dump_frames(AVCodecContext *avctx, davs2_picture_t *pic, int *got_frame,
+static int davs2_dump_frames(AVCodecContext *avctx, davs2_picture_t *pic,
                              davs2_seq_info_t *headerset, int ret_type, AVFrame *frame)
 {
     DAVS2Context *cad    = avctx->priv_data;
@@ -64,10 +64,8 @@ static int davs2_dump_frames(AVCodecContext *avctx, davs2_picture_t *pic, int *g
     int plane = 0;
     int line  = 0;
 
-    if (!headerset) {
-        *got_frame = 0;
+    if (!headerset)
         return 0;
-    }
 
     if (!pic || ret_type == DAVS2_GOT_HEADER) {
         avctx->width     = headerset->width;
@@ -182,7 +180,7 @@ static int davs2_decode_frame(AVCodecContext *avctx, void *data,
     ret = davs2_decoder_recv_frame(cad->decoder, &cad->headerset, &cad->out_frame);
 
     if (ret != DAVS2_DEFAULT) {
-        ret = davs2_dump_frames(avctx, &cad->out_frame, got_frame, &cad->headerset, ret, frame);
+        ret = davs2_dump_frames(avctx, &cad->out_frame, &cad->headerset, ret, frame);
         davs2_decoder_frame_unref(cad->decoder, &cad->out_frame);
         if (ret == 0 || ret == 1) {
             *got_frame = ret;
