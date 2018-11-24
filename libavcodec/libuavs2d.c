@@ -53,6 +53,7 @@ typedef struct UAVS2DContext {
         AVCodecContext *avctx;
         void *dec_handle;
         avs2_frame_t dec_frame;
+        int pts;
         int got_seqhdr;
     } UAVS2DContext;
 
@@ -65,8 +66,7 @@ static int find_next_start_code(const unsigned char *bs_data, int bs_len,int *le
     while (count >= 4 &&
         ((*(unsigned int *)data_ptr) != 0xB6010000) && /* P/B picture */
         ((*(unsigned int *)data_ptr) != 0xB3010000) && /* I   picture */
-        ((*(unsigned int *)data_ptr) != 0xB0010000) && /* sequence header
-> */
+        ((*(unsigned int *)data_ptr) != 0xB0010000) && /* sequence header*/
         ((*(unsigned int *)data_ptr) != 0xB1010000)) { /* sequence end */
         data_ptr++;
         count--;
@@ -76,7 +76,6 @@ static int find_next_start_code(const unsigned char *bs_data, int bs_len,int *le
         *left = count;
         return 1;
     }
-
     return 0;
 }
 
@@ -84,10 +83,11 @@ static int find_next_start_code(const unsigned char *bs_data, int bs_len,int *le
 static int ff_uavs2d_init(AVCodecContext *avctx)
 {
     UAVS2DContext *h = avctx->priv_data;
-    h->dec_handle = uavs2d_lib_create(1, 1);
+
+    h->dec_handle = uavs2d_lib_create(1, avctx->thread_count);
     h->dec_frame.i_output_type = AVS2_OUT_I420;
     h->got_seqhdr = 0;
-
+    h->pts=0;
     avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
     return 0;
 }
@@ -115,6 +115,7 @@ static void uavs2d_flush(AVCodecContext * avctx)
     h->got_seqhdr = 0;
     h->dec_handle = uavs2d_lib_create(1, 1);
     h->dec_frame.i_output_type = AVS2_OUT_I420;
+
 }
 
 static int uavs2d_decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt)
@@ -130,8 +131,7 @@ static int uavs2d_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
 
     if (buf_size == 0) {
         if (h->got_seqhdr) {
-            if (frm->data[0] == NULL && (ret = ff_get_buffer(avctx, frm,
-                                                  > 0)) < 0) {
+            if (frm->data[0] == NULL && (ret = ff_get_buffer(avctx, frm , 0)) < 0) {
                 return ret;
             }
             h->dec_frame.bs_len = -1;
@@ -144,9 +144,12 @@ static int uavs2d_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
             if (h->dec_frame.dec_stats == AVS2_TYPE_DECODED) {
                 *got_frame = 1;
                 frm->pts = h->dec_frame.pts;
+                frm->format =  avctx->pix_fmt;
+                frm->key_frame = h->dec_frame.frm_type == AV_PICTURE_TYPE_I ? 1 : 0;
                 frm->pict_type = IMGTYPE[h->dec_frame.frm_type];
             }
         }
+
         return 0;
     }
 
@@ -154,18 +157,19 @@ static int uavs2d_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     buf_end = buf + buf_size;
 
     while (finish == 0) {
-        if (find_next_start_code(buf_ptr, buf_end - buf_ptr,&left_bytes)) {
+        if (find_next_start_code(buf_ptr, buf_end - buf_ptr, &left_bytes)) {
             h->dec_frame.bs_len = buf_end - buf_ptr - left_bytes;
         } else {
             h->dec_frame.bs_len = buf_end - buf_ptr;
             finish = 1;
         }
-        h->dec_frame.bs_buf = (uint8_t*)buf_ptr;
+        h->dec_frame.bs_buf = (uint8_t * )
+        buf_ptr;
         h->dec_frame.pts = avpkt->pts;
 
         buf_ptr += h->dec_frame.bs_len;
 
-        if (h->got_seqhdr && frm->data[0]== NULL && (ret =ff_get_buffer(avctx, frm, 0)) < 0) {
+        if (h->got_seqhdr && frm->data[0] == NULL && (ret = ff_get_buffer(avctx, frm, 0)) < 0) {
             return ret;
         }
         h->dec_frame.p_buf_y = frm->data[0];
@@ -173,43 +177,67 @@ static int uavs2d_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
         h->dec_frame.p_buf_v = frm->data[2];
         h->dec_frame.i_stride = frm->linesize[0];
         h->dec_frame.i_stridec = frm->linesize[1];
-
+        h->dec_frame.pts = h->pts++;
         uavs2d_lib_decode(h->dec_handle, &h->dec_frame);
 
         switch (h->dec_frame.dec_stats) {
-        case AVS2_TYPE_DECODED:   /* decode one frame */
-            *got_frame = 1;
-            finish = 1;
-            frm->pts = h->dec_frame.pts;
-            frm->pict_type = IMGTYPE[h->dec_frame.frm_type];
-            break;
-        case AVS2_TYPE_ERROR:     /* error, current or next frame was not decoded */
-            av_log(h->avctx, AV_LOG_WARNING, "decode error\n");
-            break;
-        case AVS2_TYPE_DROP:     /* error, current or next frame was not decoded */
-            av_log(h->avctx, AV_LOG_WARNING, "DROP non-RA frame\n");
-            break;
-        case AVS2_TYPE_SEQ:       /* sequence header was decoded */
-            if (avctx->width != h->dec_frame.info.img_width || avctx->height != h->dec_frame.info.img_height) {
-                static const int avs2_fps_num[8] = { 240000, 24, 25,
-        > 30000, 30, 50, 60000, 60 };
-                static const int avs2_fps_den[8] = {   1001,  1,  1,
-        > 1001,  1,  1,  1001,  1 };
-                av_log(avctx, AV_LOG_INFO, "dimension change! %dx%d ->%dx%d\n", avctx->width, avctx->height, h->dec_frame.info.img_width,h->dec_frame.info.img_height);
-                ret = ff_set_dimensions(avctx,
-                         > h->dec_frame.info.img_width, h->dec_frame.info.img_height);
+            case AVS2_TYPE_DECODED:   /* decode one frame */
+                *got_frame = 1;
+                finish = 1;
+                frm->pts = h->dec_frame.pts;
+                frm->format =  avctx->pix_fmt;
+                frm->key_frame = h->dec_frame.frm_type == AV_PICTURE_TYPE_I ? 1 : 0;
+                frm->pict_type = IMGTYPE[h->dec_frame.frm_type];
+                break;
+            case AVS2_TYPE_ERROR:     /* error, current or next frame was not decoded */
+                av_log(h->avctx, AV_LOG_WARNING, "decode error\n");
+                break;
+            case AVS2_TYPE_DROP:     /* error, current or next frame was not decoded */
+                av_log(h->avctx, AV_LOG_WARNING, "DROP non-RA frame\n");
+                break;
+            case AVS2_TYPE_SEQ:       /* sequence header was decoded */
+                if (avctx->width != h->dec_frame.info.img_width || avctx->height != h->dec_frame.info.img_height) {
+                    static const int avs2_fps_num[8] = {240000, 24, 25, 30000, 30, 50, 60000, 60};
+                    //static const float FRAME_RATE[8] = {
+                    //        24000.0f / 1001.0f, 24.0f, 25.0f, 30000.0f / 1001.0f, 30.0f, 50.0f, 60000.0f / 1001.0f, 60.0f
+                    //};
+                    static const int avs2_fps_den[8] = {1001, 1, 1, 1001, 1, 1, 1001, 1};
+                    av_log(avctx, AV_LOG_INFO, "dimension change! %dx%d ->%dx%d\n",
+                            avctx->width,
+                            avctx->height, h->dec_frame.info.img_width, h->dec_frame.info.img_height);
 
-                if (ret < 0) {
-                    return ret;
+                    ret = ff_set_dimensions(avctx, h->dec_frame.info.img_width, h->dec_frame.info.img_height);
+                    if (ret < 0) {
+                        return ret;
+                    }
+
+                    av_log(avctx, AV_LOG_INFO,
+                           " profile_id:%d\n"
+                           " level_id:%d\n"
+                           " progressive_seq:%d\n"
+                           " img_width:%d\n"
+                           " img_height:%d\n"
+                           " output_bit_depth:%d\n"
+                           " frame_rate_code:%d\n"
+                           " sample_bit_depth:%d\n",
+                           h->dec_frame.info.profile_id,
+                           h->dec_frame.info.level_id,
+                           h->dec_frame.info.progressive_seq,
+                           h->dec_frame.info.img_width,
+                           h->dec_frame.info.img_height,
+                           h->dec_frame.info.output_bit_depth,
+                           h->dec_frame.info.frame_rate_code,
+                           h->dec_frame.info.seq_info.sample_bit_depth
+                    );
+                    avctx->framerate.num = avs2_fps_num[h->dec_frame.info.frame_rate_code-1];
+                    avctx->framerate.den = avs2_fps_den[h->dec_frame.info.frame_rate_code-1];
+
+                    avctx->pix_fmt = h->dec_frame.info.output_bit_depth == 10 ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
                 }
-                avctx->framerate.num = avs2_fps_num[h->dec_frame.
-                                                       > info.frame_rate_code];
-                avctx->framerate.den = avs2_fps_den[h->dec_frame.
-                                                       > info.frame_rate_code];
-            }
-            h->got_seqhdr = 1;
+
+                h->got_seqhdr = 1;
         }
-     }
+    }
 
     return buf_ptr - buf;
 }
@@ -225,6 +253,6 @@ AVCodec ff_libuavs2d_decoder = {
             .decode         = uavs2d_decode_frame,
             .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
             .flush          = uavs2d_flush,
-            .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,AV_PIX_FMT_YUV420P10,
+            .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,AV_PIX_FMT_YUV420P10LE,
                                                                  AV_PIX_FMT_NONE },
         };
