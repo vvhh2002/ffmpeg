@@ -677,6 +677,7 @@ extern AVCodec ff_libcelt_decoder;
 extern AVCodec ff_libcodec2_encoder;
 extern AVCodec ff_libcodec2_decoder;
 extern AVCodec ff_libdavs2_decoder;
+extern AVCodec ff_libuavs2d_decoder;
 extern AVCodec ff_libfdk_aac_encoder;
 extern AVCodec ff_libfdk_aac_decoder;
 extern AVCodec ff_libgsm_encoder;
