@@ -33,6 +33,7 @@
 #include <libavutil/samplefmt.h>
 #include <libavutil/timestamp.h>
 #include <libavformat/avformat.h>
+#include<sys/time.h>
 
 static AVFormatContext *fmt_ctx = NULL;
 static AVCodecContext *video_dec_ctx = NULL, *audio_dec_ctx;
@@ -60,6 +61,9 @@ static int audio_frame_count = 0;
  * needs. Look for the use of refcount in this example to see what are the
  * differences of API usage between them. */
 static int refcount = 0;
+static bool isTestMode=false;
+static struct timeval tvBegin, tvEnd;;
+double dTotalDuration=0.0;
 
 static int decode_packet(int *got_frame, int cached)
 {
@@ -69,6 +73,7 @@ static int decode_packet(int *got_frame, int cached)
     *got_frame = 0;
 
     if (pkt.stream_index == video_stream_idx) {
+        gettimeofday(&tvBegin, NULL);
         /* decode video frame */
         ret = avcodec_decode_video2(video_dec_ctx, frame, got_frame, &pkt);
         if (ret < 0) {
@@ -97,6 +102,20 @@ static int decode_packet(int *got_frame, int cached)
                    cached ? "(cached)" : "",
                    video_frame_count++, frame->coded_picture_number);
 
+            gettimeofday(&tvEnd, NULL);
+            double dDuration = 1000 * (tvEnd.tv_sec - tvBegin.tv_sec) + ((tvEnd.tv_usec - tvBegin.tv_usec) / 1000.0);
+            dTotalDuration+=dDuration;
+
+            double fps= video_frame_count/(dTotalDuration/1000);
+            printf("video_frame%s n:%d coded_n:%d output fps:%3.3f Total Decode Duration:%3.3f, Now Decode Duration %3.3f \n",
+                   "",
+                   video_frame_count,
+                   frame->coded_picture_number,
+                   fps,
+                   dTotalDuration,
+                   dDuration
+                   );
+
             /* copy decoded frame to destination buffer:
              * this is required since rawvideo expects non aligned data */
             av_image_copy(video_dst_data, video_dst_linesize,
@@ -104,6 +123,7 @@ static int decode_packet(int *got_frame, int cached)
                           pix_fmt, width, height);
 
             /* write to rawvideo file */
+            if(!isTestMode)
             fwrite(video_dst_data[0], 1, video_dst_bufsize, video_dst_file);
         }
     } else if (pkt.stream_index == audio_stream_idx) {
@@ -134,6 +154,7 @@ static int decode_packet(int *got_frame, int cached)
              * in these cases.
              * You should use libswresample or libavfilter to convert the frame
              * to packed data. */
+            if(!isTestMode)
             fwrite(frame->extended_data[0], 1, unpadded_linesize, audio_dst_file);
         }
     }
@@ -232,8 +253,9 @@ int main (int argc, char **argv)
 {
     int ret = 0, got_frame;
 
+
     if (argc != 4 && argc != 5) {
-        fprintf(stderr, "usage: %s [-refcount] input_file video_output_file audio_output_file\n"
+        fprintf(stderr, "usage: %s [-refcount] [-t] input_file video_output_file audio_output_file\n"
                 "API example program to show how to read frames from an input file.\n"
                 "This program reads frames from a file, decodes them, and writes decoded\n"
                 "video frames to a rawvideo file named video_output_file, and decoded\n"
@@ -241,6 +263,7 @@ int main (int argc, char **argv)
                 "If the -refcount option is specified, the program use the\n"
                 "reference counting frame system which allows keeping a copy of\n"
                 "the data for longer than one decode call.\n"
+                " -t only test ! "
                 "\n", argv[0]);
         exit(1);
     }
@@ -248,9 +271,18 @@ int main (int argc, char **argv)
         refcount = 1;
         argv++;
     }
-    src_filename = argv[1];
-    video_dst_filename = argv[2];
-    audio_dst_filename = argv[3];
+    if (argc == 4 && !strcmp(argv[2], "-t")) {
+       isTestMode=true;
+       src_filename = argv[3];
+       video_dst_filename = "null";
+        audio_dst_filename = "null";
+    }else{
+        src_filename = argv[1];
+        video_dst_filename = argv[2];
+        audio_dst_filename = argv[3];
+    }
+
+
 
     /* open input file, and allocate format context */
     if (avformat_open_input(&fmt_ctx, src_filename, NULL, NULL) < 0) {
@@ -267,12 +299,16 @@ int main (int argc, char **argv)
     if (open_codec_context(&video_stream_idx, &video_dec_ctx, fmt_ctx, AVMEDIA_TYPE_VIDEO) >= 0) {
         video_stream = fmt_ctx->streams[video_stream_idx];
 
-        video_dst_file = fopen(video_dst_filename, "wb");
-        if (!video_dst_file) {
-            fprintf(stderr, "Could not open destination file %s\n", video_dst_filename);
-            ret = 1;
-            goto end;
+        if(!isTestMode)
+        {
+            video_dst_file = fopen(video_dst_filename, "wb");
+            if (!video_dst_file) {
+                fprintf(stderr, "Could not open destination file %s\n", video_dst_filename);
+                ret = 1;
+                goto end;
+            }
         }
+
 
         /* allocate image where the decoded image will be put */
         width = video_dec_ctx->width;
@@ -289,11 +325,13 @@ int main (int argc, char **argv)
 
     if (open_codec_context(&audio_stream_idx, &audio_dec_ctx, fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
         audio_stream = fmt_ctx->streams[audio_stream_idx];
-        audio_dst_file = fopen(audio_dst_filename, "wb");
-        if (!audio_dst_file) {
-            fprintf(stderr, "Could not open destination file %s\n", audio_dst_filename);
-            ret = 1;
-            goto end;
+        if(!isTestMode){
+            audio_dst_file = fopen(audio_dst_filename, "wb");
+            if (!audio_dst_file) {
+                fprintf(stderr, "Could not open destination file %s\n", audio_dst_filename);
+                ret = 1;
+                goto end;
+            }
         }
     }
 
