@@ -191,6 +191,7 @@ static int open_codec_context(int *stream_idx,
                     av_get_media_type_string(type));
             return AVERROR(EINVAL);
         }
+        
 
         /* Allocate a codec context for the decoder */
         *dec_ctx = avcodec_alloc_context3(dec);
