@@ -206,6 +206,7 @@ static int open_codec_context(int *stream_idx,
                     av_get_media_type_string(type));
             return ret;
         }
+        (*dec_ctx)->thread_count=8;
 
         /* Init the decoders, with or without reference counting */
         av_dict_set(&opts, "refcounted_frames", refcount ? "1" : "0", 0);
