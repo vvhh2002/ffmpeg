@@ -61,7 +61,7 @@ static int audio_frame_count = 0;
  * needs. Look for the use of refcount in this example to see what are the
  * differences of API usage between them. */
 static int refcount = 0;
-static bool isTestMode=false;
+static int isTestMode=0;
 static struct timeval tvBegin, tvEnd;;
 double dTotalDuration=0.0;
 
@@ -254,7 +254,7 @@ int main (int argc, char **argv)
     int ret = 0, got_frame;
 
 
-    if (argc != 4 && argc != 5) {
+    if (argc != 4 && argc != 5 && argc != 3 ) {
         fprintf(stderr, "usage: %s [-refcount] [-t] input_file video_output_file audio_output_file\n"
                 "API example program to show how to read frames from an input file.\n"
                 "This program reads frames from a file, decodes them, and writes decoded\n"
@@ -271,9 +271,10 @@ int main (int argc, char **argv)
         refcount = 1;
         argv++;
     }
-    if (argc == 4 && !strcmp(argv[2], "-t")) {
-       isTestMode=true;
-       src_filename = argv[3];
+    if (argc == 3 && !strcmp(argv[1], "-t")) {
+       isTestMode=1;
+        argv++;
+       src_filename = argv[1];
        video_dst_filename = "null";
         audio_dst_filename = "null";
     }else{
